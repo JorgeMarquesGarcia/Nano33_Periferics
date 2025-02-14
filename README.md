@@ -1,3 +1,4 @@
 # Nano33_Periferics
 
-Prueba commit
+All project has been developed using PlatformIO. 
+
