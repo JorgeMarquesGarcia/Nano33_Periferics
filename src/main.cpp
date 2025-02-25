@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include "mbed.h"
+
 #if !( ARDUINO_ARCH_NRF52840 && TARGET_NAME == ARDUINO_NANO33BLE )
   #error This code is designed to run on nRF52-based Nano-33-BLE boards using mbed-RTOS platform! Please check your Tools->Board setting.
 #endif
@@ -23,13 +25,18 @@ NRF52_MBED_ISRTimer ISR_Timer;
   #endif
 #endif
 
+extern const int adcPin = P0_4;
+volatile bool adcTrigger = false;
+const PinName PWM_Pin = P0_4; // PinName for PwmOut
+const unsigned int PWMPeriod = 200; // us (minimum value is 2)
+const float PWMDutyCycle = 0.5; // ratio
+
+mbed::PwmOut pwm(LED1);
+
 void TimerHandler()
 {
   ISR_Timer.run();
 }
-
-extern const int adcPin = P0_4;
-volatile bool adcTrigger = false;
 
 void triggerADC() {
   adcTrigger = true;
@@ -48,7 +55,13 @@ void setup() {
   pinMode(adcPin, INPUT);
   pinMode(LED_BLUE_PIN, OUTPUT);
 
-  if (ITimer.attachInterruptInterval(HW_TIMER_INTERVAL_MS *1000 , TimerHandler))
+  // set the PWM period to PWMPeriod
+  pwm.period_us(PWMPeriod);
+
+  // start the PWM signal with the duty cycle set to PWMDutyCycle
+  pwm.write(PWMDutyCycle);
+
+  if (ITimer.attachInterruptInterval(HW_TIMER_INTERVAL_MS * 1000, TimerHandler))
   {
     Serial.print(F("Starting ITimer OK, millis() = "));
     Serial.println(millis());
@@ -60,12 +73,16 @@ void setup() {
 }
 
 void loop() {
-    if (adcTrigger) {
+  if (adcTrigger) {
     adcTrigger = false;
     int adcValue = analogRead(adcPin);
     char buffer[50];
     sprintf(buffer, "ADC read value: %d", adcValue);
     Serial.println(buffer);
+
+    // Mapear el valor del ADC (0-1023) al rango PWM (0.0-1.0)
+    float pwmValue = map(adcValue, 0, 1023, 0, 1000) / 1000.0;
+    pwm.write(pwmValue);
   }
 }
 

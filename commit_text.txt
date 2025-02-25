@@ -1,0 +1,8 @@
+ADC interrupt each 10 seconds. 
+
+The main idea of the interrupt has been taken from the library NRF52_MBED_TimerInterrupt, from khoih-prog, in particular
+from https://github.com/khoih-prog/NRF52_MBED_TimerInterrupt/tree/main/examples/TimerInterruptLEDDemo 
+
+The problem with this library is that ISR timer do not support complex problems in handler or will be hang (really proven) 
+so I decided to make a trigger in the handler and the read and write task in the loop. 
+
