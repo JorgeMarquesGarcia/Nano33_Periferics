@@ -11,8 +11,8 @@
 #include "NRF52_MBED_TimerInterrupt.h"
 #include "NRF52_MBED_ISR_Timer.h"
 
-#define HW_TIMER_INTERVAL_MS      1000  // Intervalo del temporizador de hardware en milisegundos (1 segundo)
-#define TIMER_INTERVAL_10S        10000L  // Intervalo del temporizador basado en ISR en milisegundos (10 segundos)
+#define HW_TIMER_INTERVAL_MS      1000  
+#define TIMER_INTERVAL_10S        10000L  //Frecuencia de la interrupción
 
 NRF52_MBED_Timer ITimer(NRF_TIMER_3);
 NRF52_MBED_ISRTimer ISR_Timer;
@@ -30,18 +30,18 @@ volatile bool adcTrigger = false;
 const PinName PWM_Pin = P0_4; // PinName for PwmOut
 const unsigned int PWMPeriod = 200; // us (minimum value is 2)
 const float PWMDutyCycle = 0.5; // ratio
+/*const char *c1 = "ADC";
+const char *c2 = "ADC(x)";
+const char *c3 = "PWM(x)";*/
+String cmd = "";
 
 mbed::PwmOut pwm(LED1);
 
-void TimerHandler()
-{
-  ISR_Timer.run();
-}
-
-void triggerADC() {
-  adcTrigger = true;
-  digitalWrite(LED_BLUE_PIN, !digitalRead(LED_BLUE_PIN));
-}
+void PWM_write(int &ADCvalue);
+void TimerHandler();
+void triggerADC();
+void UART_read();
+void ADCread();
 
 void setup() {
   Serial.begin(115200);
@@ -69,22 +69,72 @@ void setup() {
   else
     Serial.println(F("Can't set ITimer. Select another freq. or timer"));
 
-  ISR_Timer.setInterval(TIMER_INTERVAL_10S,  triggerADC);
+
+
+  //ISR_Timer.setInterval(TIMER_INTERVAL_10S,  triggerADC);
 }
 
 void loop() {
-  if (adcTrigger) {
-    adcTrigger = false;
+  // Llamar a UART_read para procesar comandos entrantes
+  UART_read();
+  if (adcTrigger)
+  {
     int adcValue = analogRead(adcPin);
     char buffer[50];
     sprintf(buffer, "ADC read value: %d", adcValue);
     Serial.println(buffer);
-
-    // Mapear el valor del ADC (0-1023) al rango PWM (0.0-1.0)
-    float pwmValue = map(adcValue, 0, 1023, 0, 1000) / 1000.0;
-    pwm.write(pwmValue);
+    adcTrigger = false;
   }
 }
 
+void PWM_write(int ADCvalue, int cycle)
+{
+  // Mapear el valor del ADC (0-1023) al rango PWM (0.0-1.0)
+  float pwmValue = map(ADCvalue, 0, 1023, 0, 1000) / 1000.0;
+  pwm.write(pwmValue);
+}
 
+void UART_read()
+{
+  // Leer el puerto serie
+  if (Serial.available() > 0)
+  {
+    cmd = Serial.readStringUntil('\n');
+    cmd.trim(); // Eliminar espacios en blanco al principio y al final
+    Serial.println(cmd); // Imprimir el comando recibido para depuración
 
+    // Procesar el comando recibido
+    if (cmd == "ADC"){
+      ADCread(); 
+    }
+    else if(cmd.startsWith("ADC(")){
+      String intervalStr = cmd.substring(4, cmd.length() - 1);
+      unsigned long interval = intervalStr.toFloat();
+      Serial.println(interval);
+      if(interval != 0){
+          ISR_Timer.setInterval(interval*1000,  triggerADC);
+        }else ISR_Timer.deleteTimer(0);
+    }else if(cmd.startsWith("PWM(")){
+      String cycleStr = cmd.substring(4, cmd.length() - 1);
+      float cycle = cycleStr.toFloat();
+      float DutyCycle = constrain(cycle, 0.0, 1.0);
+      pwm.write(DutyCycle);
+    }
+}
+}
+
+void TimerHandler() {
+  ISR_Timer.run();
+}
+
+void triggerADC() {
+  adcTrigger = true;
+  //digitalWrite(LED_BLUE_PIN, !digitalRead(LED_BLUE_PIN));
+}
+
+void ADCread(){
+  int adcValue = analogRead(adcPin);
+  char buffer[50];
+  sprintf(buffer, "ADC read value: %d", adcValue);
+  Serial.println(buffer);
+}
