@@ -1,142 +1,85 @@
-/*#include <Arduino.h>
-#include "mbed.h"
+/*
+  Arduino LSM9DS1 - Simple Accelerometer
+
+  This example reads the acceleration values from the LSM9DS1
+  sensor and continuously prints them to the Serial Monitor
+  or Serial Plotter.
+
+  The circuit:
+  - Arduino Nano 33 BLE Sense
+
+  created 10 Jul 2019
+  by Riccardo Rizzo
+
+  This example code is in the public domain.
+*/
+#include <Arduino.h>
 #include <Wire.h>
-
-#if !( ARDUINO_ARCH_NRF52840 && TARGET_NAME == ARDUINO_NANO33BLE )
-  #error This code is designed to run on nRF52-based Nano-33-BLE boards using mbed-RTOS platform! Please check your Tools->Board setting.
-#endif
-
-#define TIMER_INTERRUPT_DEBUG         0
-#define _TIMERINTERRUPT_LOGLEVEL_     0
-
-#include "NRF52_MBED_TimerInterrupt.h"
-#include "NRF52_MBED_ISR_Timer.h"
-
-#define HW_TIMER_INTERVAL_MS      1000  
-#define TIMER_INTERVAL_10S        10000L  //Frecuencia de la interrupción
-
-NRF52_MBED_Timer ITimer(NRF_TIMER_3);
-NRF52_MBED_ISRTimer ISR_Timer;
-
-#ifndef LED_BLUE_PIN
-  #if defined(LEDB)
-    #define LED_BLUE_PIN          LEDB
-  #else
-    #define LED_BLUE_PIN          D7
-  #endif
-#endif
+#include <SPI.h>
+#include <Adafruit_LSM9DS1.h>
+#include <Adafruit_Sensor.h>
 
 
+Adafruit_LSM9DS1 IMU = Adafruit_LSM9DS1();
+void setupSensor();
 
-extern const int adcPin = P0_4;
-volatile bool adcTrigger = false;
-const PinName PWM_Pin = P0_4; // PinName for PwmOut
-const unsigned int PWMPeriod = 200; // us (minimum value is 2)
-const float PWMDutyCycle = 0.5; // ratio
-String cmd = "";
-
-mbed::PwmOut pwm(LED1);
-
-void PWM_write(int &ADCvalue);
-void TimerHandler();
-void triggerADC();
-void UART_read();
-void ADCread();
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 5000);
-  delay(100);
-
-  Serial.print(F("\nStarting TimerInterruptLEDDemo on "));
-  Serial.println(BOARD_NAME);
-  Serial.println(NRF52_MBED_TIMER_INTERRUPT_VERSION);
-
-  pinMode(adcPin, INPUT);
-  pinMode(LED_BLUE_PIN, OUTPUT);
-
-  // set the PWM period to PWMPeriod
-  pwm.period_us(PWMPeriod);
-
-  // start the PWM signal with the duty cycle set to PWMDutyCycle
-  pwm.write(PWMDutyCycle);
-
-  if (ITimer.attachInterruptInterval(HW_TIMER_INTERVAL_MS * 1000, TimerHandler))
-  {
-    Serial.print(F("Starting ITimer OK, millis() = "));
-    Serial.println(millis());
+  while (!Serial) {
+    // Espera a que el puerto serial esté listo
   }
-  else
-    Serial.println(F("Can't set ITimer. Select another freq. or timer"));
+  Serial.println("Started");
 
-
-
-  //ISR_Timer.setInterval(TIMER_INTERVAL_10S,  triggerADC);
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+  }
+  Serial.println("IMU initialized successfully");
+  setupSensor();
 }
 
 void loop() {
-  // Llamar a UART_read para procesar comandos entrantes
-  UART_read();
-  if (adcTrigger)
-  {
-    int adcValue = analogRead(adcPin);
-    char buffer[50];
-    sprintf(buffer, "ADC read value: %d", adcValue);
-    Serial.println(buffer);
-    adcTrigger = false;
-  }
+  IMU.read();
+  sensors_event_t accel, mag, gyro, temp; // Struct defined by library check Adafruit_Sensor.h
+  IMU.getEvent(&accel, &mag, &gyro, &temp);
+  
+
+  Serial.print("Accel X: "); Serial.print(accel.acceleration.x); Serial.print(" m/s^2");
+  Serial.print("\tY: "); Serial.print(accel.acceleration.y);     Serial.print(" m/s^2 ");
+  Serial.print("\tZ: "); Serial.print(accel.acceleration.z);     Serial.println(" m/s^2 ");
+
+  Serial.print("Mag X: "); Serial.print(mag.magnetic.x);   Serial.print(" uT");
+  Serial.print("\tY: "); Serial.print(mag.magnetic.y);     Serial.print(" uT");
+  Serial.print("\tZ: "); Serial.print(mag.magnetic.z);     Serial.println(" uT");
+
+  Serial.print("Gyro X: "); Serial.print(gyro.gyro.x);   Serial.print(" rad/s");
+  Serial.print("\tY: "); Serial.print(gyro.gyro.y);      Serial.print(" rad/s");
+  Serial.print("\tZ: "); Serial.print(gyro.gyro.z);      Serial.println(" rad/s");
+  Serial.print("Temp: "); Serial.print(temp.temperature/100); Serial.println(" deg C");
+
+  Serial.println();
+  delay(1000);
 }
 
-void PWM_write(int ADCvalue, int cycle)
+
+void setupSensor()
 {
-  // Mapear el valor del ADC (0-1023) al rango PWM (0.0-1.0)
-  float pwmValue = map(ADCvalue, 0, 1023, 0, 1000) / 1000.0;
-  pwm.write(pwmValue);
-}
+    // 1.) Set the accelerometer range
+    IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_2G, IMU.LSM9DS1_ACCELDATARATE_10HZ); //100ms
+    //IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_4G, IMU.LSM9DS1_ACCELDATARATE_119HZ);
+    //IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_8G, IMU.LSM9DS1_ACCELDATARATE_476HZ);
+    //IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_16G, IMU.LSM9DS1_ACCELDATARATE_952HZ);
+    
+    // 2.) Set the magnetometer sensitivity
+    IMU.setupMag(IMU.LSM9DS1_MAGGAIN_4GAUSS);
+    //IMU.setupMag(IMU.LSM9DS1_MAGGAIN_8GAUSS);
+    //IMU.setupMag(IMU.LSM9DS1_MAGGAIN_12GAUSS);
+    //IMU.setupMag(IMU.LSM9DS1_MAGGAIN_16GAUSS);
 
-void UART_read()
-{
-  // Leer el puerto serie
-  if (Serial.available() > 0)
-  {
-    cmd = Serial.readStringUntil('\n');
-    cmd.trim(); // Eliminar espacios en blanco al principio y al final
-    Serial.println(cmd); // Imprimir el comando recibido para depuración
+    // 3.) Setup the gyroscope
+    IMU.setupGyro(IMU.LSM9DS1_GYROSCALE_245DPS);
+    //IMU.setupGyro(IMU.LSM9DS1_GYROSCALE_500DPS);
+    //IMU.setupGyro(IMU.LSM9DS1_GYROSCALE_2000DPS);
 
-    // Procesar el comando recibido
-    if (cmd == "ADC"){
-      ADCread(); 
-    }
-    else if(cmd.startsWith("ADC(")){
-      String intervalStr = cmd.substring(4, cmd.length() - 1);
-      unsigned long interval = intervalStr.toFloat();
-      Serial.println(interval);
-      if(interval != 0){
-          ISR_Timer.setInterval(interval*1000,  triggerADC);
-        }else ISR_Timer.deleteTimer(0);
-    }else if(cmd.startsWith("PWM(")){
-      String cycleStr = cmd.substring(4, cmd.length() - 1);
-      float cycle = cycleStr.toFloat();
-      float DutyCycle = constrain(cycle, 0.0, 1.0);
-      pwm.write(DutyCycle);
-    }
-}
-}
 
-void TimerHandler() {
-  ISR_Timer.run();
 }
-
-void triggerADC() {
-  adcTrigger = true;
-  //digitalWrite(LED_BLUE_PIN, !digitalRead(LED_BLUE_PIN));
-}
-
-void ADCread(){
-  int adcValue = analogRead(adcPin);
-  char buffer[50];
-  sprintf(buffer, "ADC read value: %d", adcValue);
-  Serial.println(buffer);
-}
-
-*/
