@@ -1,31 +1,45 @@
-/*
-  Arduino LSM9DS1 - Simple Accelerometer
-
-  This example reads the acceleration values from the LSM9DS1
-  sensor and continuously prints them to the Serial Monitor
-  or Serial Plotter.
-
-  The circuit:
-  - Arduino Nano 33 BLE Sense
-
-  created 10 Jul 2019
-  by Riccardo Rizzo
-
-  This example code is in the public domain.
-*/
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
-#include <Adafruit_LSM9DS1.h>
-#include <Adafruit_Sensor.h>
+#include <Arduino_LSM9DS1.h>
 
+#if !( ARDUINO_ARCH_NRF52840 && TARGET_NAME == ARDUINO_NANO33BLE )
+  #error This code is designed to run on nRF52-based Nano-33-BLE boards using mbed-RTOS platform! Please check your Tools->Board setting.
+#endif
+#define TIMER_INTERRUPT_DEBUG         0
+#define _TIMERINTERRUPT_LOGLEVEL_     0
 
-Adafruit_LSM9DS1 IMU = Adafruit_LSM9DS1();
-void setupSensor();
+#include "NRF52_MBED_TimerInterrupt.h"
+#include "NRF52_MBED_ISR_Timer.h"
+
+#define HW_TIMER_INTERVAL_MS      1000  // Intervalo del temporizador de hardware en milisegundos (1 segundo)
+#define TIMER_INTERVAL_10S       50L  // Intervalo del temporizador basado en ISR en milisegundos (10 segundos)
+NRF52_MBED_Timer ITimer(NRF_TIMER_3);
+NRF52_MBED_ISRTimer ISR_Timer;
+#ifndef LED_BLUE_PIN
+  #if defined(LEDB)
+    #define LED_BLUE_PIN          LEDB
+  #else
+    #define LED_BLUE_PIN          D7
+  #endif
+#endif
+
+volatile bool UARTtrigger = false;
+
+typedef struct {
+  float acc_x, acc_y, acc_z;
+  float gyro_x, gyro_y, gyro_z;
+  float mag_x, mag_y, mag_z;
+} Vector3D;
+
+void triggerUART();
+void ReadData();
+void TimerHandler();
 
 
 void setup() {
   Serial.begin(115200);
+  pinMode(LED_BLUE_PIN, OUTPUT);
   while (!Serial) {
     // Espera a que el puerto serial esté listo
   }
@@ -33,53 +47,58 @@ void setup() {
 
   if (!IMU.begin()) {
     Serial.println("Failed to initialize IMU!");
+    while(1);
   }
+  IMU.setContinuousMode(); // Set continuous mode for the IMU
   Serial.println("IMU initialized successfully");
-  setupSensor();
+  Serial.print("Accelerometer sample rate = ");
+  Serial.print(IMU.accelerationSampleRate());
+  Serial.println(" Hz");
+  Serial.print("Gyro sample rate = ");
+  Serial.print(IMU.gyroscopeSampleRate());
+  Serial.println(" Hz");
+  Serial.print("Magneto sample rate = ");
+  Serial.print(IMU.magneticFieldSampleRate());
+  Serial.println(" Hz");
+  Serial.println();
+  if (ITimer.attachInterruptInterval(HW_TIMER_INTERVAL_MS *1000 , TimerHandler))
+  {
+    Serial.print(F("Starting ITimer OK, millis() = "));
+    Serial.println(millis());
+  }
+  else
+    Serial.println(F("Can't set ITimer. Select another freq. or timer"));
+
+  ISR_Timer.setInterval(TIMER_INTERVAL_10S,  triggerUART);
 }
+
+Vector3D SensorData;
 
 void loop() {
-  IMU.read();
-  sensors_event_t accel, mag, gyro, temp; // Struct defined by library check Adafruit_Sensor.h
-  IMU.getEvent(&accel, &mag, &gyro, &temp);
-  
-
-  Serial.print("Accel X: "); Serial.print(accel.acceleration.x); Serial.print(" m/s^2");
-  Serial.print("\tY: "); Serial.print(accel.acceleration.y);     Serial.print(" m/s^2 ");
-  Serial.print("\tZ: "); Serial.print(accel.acceleration.z);     Serial.println(" m/s^2 ");
-
-  Serial.print("Mag X: "); Serial.print(mag.magnetic.x);   Serial.print(" uT");
-  Serial.print("\tY: "); Serial.print(mag.magnetic.y);     Serial.print(" uT");
-  Serial.print("\tZ: "); Serial.print(mag.magnetic.z);     Serial.println(" uT");
-
-  Serial.print("Gyro X: "); Serial.print(gyro.gyro.x);   Serial.print(" rad/s");
-  Serial.print("\tY: "); Serial.print(gyro.gyro.y);      Serial.print(" rad/s");
-  Serial.print("\tZ: "); Serial.print(gyro.gyro.z);      Serial.println(" rad/s");
-  Serial.print("Temp: "); Serial.print(temp.temperature/100); Serial.println(" deg C");
-
-  Serial.println();
-  delay(1000);
+  ReadData();
+  char buffer[150];
+  if (UARTtrigger) {
+    UARTtrigger = false;
+    sprintf(buffer, "Accel X:%.2f \tY:%.2f \tZ:%.2f\n Gyro X:%.2f\t Y:%.2f\t Z:%.2f\n B: X:%2.f\t Y:%.2f\t Z:%.2f\n", 
+     SensorData.acc_x, SensorData.acc_y, SensorData.acc_z, SensorData.gyro_x, SensorData.gyro_y, SensorData.gyro_z, SensorData.mag_x, SensorData.mag_y, SensorData.mag_z);
+    Serial.println(buffer);
+  }
 }
 
 
-void setupSensor()
+void ReadData(){
+  IMU.readAcceleration(SensorData.acc_x, SensorData.acc_y, SensorData.acc_z);
+  IMU.readGyroscope(SensorData.gyro_x, SensorData.gyro_y, SensorData.gyro_z); 
+  IMU.readMagneticField(SensorData.mag_x, SensorData.mag_y, SensorData.mag_z);
+}
+
+void TimerHandler()
 {
-    // 1.) Set the accelerometer range
-    IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_2G, IMU.LSM9DS1_ACCELDATARATE_10HZ); //100ms
-    //IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_4G, IMU.LSM9DS1_ACCELDATARATE_119HZ);
-    //IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_8G, IMU.LSM9DS1_ACCELDATARATE_476HZ);
-    //IMU.setupAccel(IMU.LSM9DS1_ACCELRANGE_16G, IMU.LSM9DS1_ACCELDATARATE_952HZ);
-    
-    // 2.) Set the magnetometer sensitivity
-    IMU.setupMag(IMU.LSM9DS1_MAGGAIN_4GAUSS);
-    //IMU.setupMag(IMU.LSM9DS1_MAGGAIN_8GAUSS);
-    //IMU.setupMag(IMU.LSM9DS1_MAGGAIN_12GAUSS);
-    //IMU.setupMag(IMU.LSM9DS1_MAGGAIN_16GAUSS);
+  ISR_Timer.run();
+}
 
-    // 3.) Setup the gyroscope
-    IMU.setupGyro(IMU.LSM9DS1_GYROSCALE_245DPS);
-    //IMU.setupGyro(IMU.LSM9DS1_GYROSCALE_500DPS);
-    //IMU.setupGyro(IMU.LSM9DS1_GYROSCALE_2000DPS);
-
-
+void triggerUART()
+{
+  UARTtrigger = true;
+  digitalWrite(LED_BLUE_PIN, !digitalRead(LED_BLUE_PIN));
 }
